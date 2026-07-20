@@ -1,0 +1,25 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    restart: always
+
+  coturn:
+    image: coturn/coturn:latest
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+    environment:
+      - DETECT_EXTERNAL_IP=yes
+    command:
+      - -n
+      - --lt-cred-mech
+      - --fingerprint
+      - --no-multicast-peers
+      - --no-loopback-peers
+      - --user=myuser:mypassword
+      - --realm=lightcall.local
+    restart: always

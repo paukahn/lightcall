@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>LightCall — Панель Администратора</title>
+    <style>
+        body { font-family: sans-serif; background: #121212; color: #fff; padding: 20px; }
+        .room-card { background: #1e1e1e; border: 1px solid #333; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .participant { display: flex; justify-content: space-between; align-items: center; padding: 8px; background: #2a2a2a; margin: 5px 0; border-radius: 4px; }
+        button { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .btn-kick { background: #dc3545; color: white; margin-left: 10px; }
+        .btn-crown { background: #ffc107; color: black; }
+        h1 { border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <h1>🛡️ Управление комнатами в RAM</h1>
+    <div id="rooms-container">Ожидание авторизации...</div>
+
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('token');
+
+        if (!token) {
+            document.body.innerHTML = '<h1>Ошибка доступа: Токен не указан (?token=...)</h1>';
+        } else {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const ws = new WebSocket(wsProtocol + window.location.host);
+
+            ws.onopen = () => ws.send(JSON.stringify({ type: 'admin-auth', token }));
+            ws.onmessage = (msg) => {
+                const data = JSON.parse(msg.data);
+                if (data.type === 'admin-state') renderRooms(data.rooms);
+                if (data.type === 'error') alert(data.message);
+            };
+
+            function renderRooms(rooms) {
+                const container = document.getElementById('rooms-container');
+                if (rooms.length === 0) {
+                    container.innerHTML = '<h3>Активных комнат нет. В памяти чисто.</h3>';
+                    return;
+                }
+                container.innerHTML = '';
+                rooms.forEach(room => {
+                    const card = document.createElement('div');
+                    card.className = 'room-card';
+                    card.innerHTML = `<h3>Комната: ${room.name} (ID: ${room.id})</h3>`;
+
+                    room.participants.forEach(p => {
+                        const div = document.createElement('div');
+                        div.className = 'participant';
+                        div.innerHTML = `
+                            <span>${p.name} ${p.isCreator ? '👑' : ''} [ID: ${p.id}] [Approved: ${p.approved}]</span>
+                            <div>
+                                <button style="background: #2a2a2a; color: white;" onclick="adminMute('${room.id}', '${p.id}', 'audio')">🔇 Звук</button>
+                                <button style="background: #2a2a2a; color: white;" onclick="adminMute('${room.id}', '${p.id}', 'video')">📷 Видео</button>
+                                ${!p.isCreator ? `<button class="btn-crown" onclick="makeCreator('${room.id}', '${p.id}')">Дать права</button>` : ''}
+                                <button class="btn-kick" onclick="kick('${room.id}', '${p.id}')">Кикнуть</button>
+                            </div>
+                        `;
+                        card.appendChild(div);
+                    });
+                    container.appendChild(card);
+                });
+            }
+
+            window.kick = (roomId, userId) => ws.send(JSON.stringify({ type: 'admin-kick', roomId, userId }));
+            window.makeCreator = (roomId, userId) => ws.send(JSON.stringify({ type: 'admin-make-creator', roomId, userId }));
+            window.adminMute = (roomId, userId, mediaType) => {
+                ws.send(JSON.stringify({ type: 'admin-mute-peer', roomId, userId, mediaType }));
+            };
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LightCall — Приватные звонки</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+    <div id="auth-screen" class="screen">
+        <h2>LightCall</h2>
+        <div class="tabs">
+            <button id="tab-create" class="active" onclick="switchTab('create')">Создать комнату</button>
+            <button id="tab-join" onclick="switchTab('join')">Войти по ID</button>
+        </div>
+
+        <div id="form-create" class="auth-form">
+            <input type="text" id="create-name" placeholder="Ваше имя" required>
+            <input type="text" id="create-room-name" placeholder="Название комнаты" required>
+            <input type="password" id="create-password" placeholder="Код доступа" required>
+            <select id="create-limit">
+                <option value="2">Максимум 2 человека</option>
+                <option value="3">Максимум 3 человека</option>
+                <option value="5">Максимум 5 человек</option>
+            </select>
+            
+            <div class="media-pre-settings">
+                <label><input type="checkbox" id="pre-cam" checked> Войти с камерой</label>
+                <label><input type="checkbox" id="pre-mic" checked> Войти с микрофоном</label>
+            </div>
+
+            <button onclick="createRoom()">Создать и получить ссылку</button>
+        </div>
+
+        <div id="form-join" class="auth-form hidden">
+            <input type="text" id="join-user-name" placeholder="Ваше имя" required>
+            <input type="text" id="join-room-id" placeholder="ID комнаты (хеш)">
+            <input type="password" id="join-password" placeholder="Код доступа">
+            
+            <div class="media-pre-settings">
+                <label><input type="checkbox" id="join-pre-cam" checked> Войти с камерой</label>
+                <label><input type="checkbox" id="join-pre-mic" checked> Войти с микрофоном</label>
+            </div>
+
+            <button onclick="joinRoomManual()">Войти в комнату</button>
+        </div>
+    </div>
+
+    <div id="lobby-screen" class="screen hidden">
+        <div class="loader"></div>
+        <p id="lobby-status">Ожидайте подтверждения от создателя комнаты...</p>
+    </div>
+
+    <div id="call-screen" class="screen hidden">
+        <div id="share-bar" class="share-bar hidden">
+            <span>Пригласить близких:</span>
+            <button onclick="copyInviteLink()" id="btn-copy-link">📋 Скопировать ссылку</button>
+        </div>
+
+        <div class="main-container">
+            <div class="video-grid" id="video-grid">
+                <div class="video-container local">
+                    <video id="local-video" autoplay playsinline muted></video>
+                    <div class="video-label">Вы</div>
+                </div>
+            </div>
+
+            <div class="chat-container">
+                <div class="chat-messages" id="chat-messages"></div>
+                <div class="chat-input-zone">
+                    <input type="text" id="chat-input" placeholder="Сообщение..." onkeypress="handleChatKey(event)">
+                    <button onclick="sendChatMessage()">Send</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="btn-mic" class="control-btn" onclick="toggleMic()" title="Микрофон">
+                <svg class="icon-on" viewBox="0 0 24 24"><path fill="currentColor" d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>
+                <svg class="icon-off hidden" viewBox="0 0 24 24"><path fill="currentColor" d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17l-11-11L2.81 1.39l2.4 2.4C4.47 4.3 4 5.1 4 6h1.7c0-.46.12-.89.31-1.28L14.7 13.4c-.16.03-.33.05-.5.05-1.66 0-3-1.34-3-3V9.17l3.78 3.78c.3-.23.57-.51.78-.78zm-1.18 5c-1.84 0-3.41-1.13-4.1-2.75L4.43 18.7c1.39 1.56 3.33 2.59 5.57 2.85V25h2v-3.45c3.24-.43 5.92-2.9 6.64-6.13l-1.3-.65c-.66 1.44-2.12 2.45-3.81 2.45z"/></svg>
+            </button>
+            
+            <button id="btn-cam" class="control-btn" onclick="toggleCam()" title="Камера">
+                <svg class="icon-on" viewBox="0 0 24 24"><path fill="currentColor" d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+                <svg class="icon-off hidden" viewBox="0 0 24 24"><path fill="currentColor" d="M18 10.48V6c0-1.1-.9-2-2-2H6.83l2 2H16v7.17l2 2v-4.69l4 4v-11l-4 4zM2.81 2.14L1.39 3.56l3 3V18c0 1.1.9 2 2 2h12c.34 0 .65-.09.93-.24l2.51 2.51 1.41-1.41L2.81 2.14zM6 18V8.56l9.44 9.44H6z"/></svg>
+            </button>
+            
+            <button id="btn-chat-toggle" class="control-btn" onclick="toggleChat()" title="Чат">
+                <svg viewBox="0 0 24 24"><path fill="currentColor" d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>
+            </button>
+            
+            <button id="btn-screen" class="control-btn desktop-only" onclick="toggleScreenShare()" title="Экран">
+                <svg viewBox="0 0 24 24"><path fill="currentColor" d="M21 3H3c-1.11 0-2 .89-2 2v12c0 1.1.89 2 2 2h5v2h8v-2h5c1.1 0 1.9-.9 1.9-2V5c0-1.11-.9-2-1.9-2zm0 14H3V5h18v12z"/></svg>
+            </button>
+            
+            <button id="btn-leave" class="control-btn danger" onclick="leaveCall()" title="Выйти">
+                <svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <div id="knock-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Кто-то стучится в комнату!</h3>
+            <p id="knock-msg">Пользователь хочет подключиться.</p>
+            <div class="modal-buttons">
+                <button class="success" id="btn-approve">Впустить</button>
+                <button class="danger" id="btn-reject">Отклонить</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="client.js"></script>
+</body>
+</html>
