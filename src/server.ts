@@ -10,7 +10,12 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'my-super-secret-admin-token';
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+
+if (!ADMIN_TOKEN) {
+    throw new Error("ADMIN_TOKEN is not configured");
+}
+
 const TG_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TG_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
@@ -462,6 +467,6 @@ wss.on('connection', (ws: WebSocket) => {
   });
 });
 
-server.listen(port, () => {
-  console.log(`[Server] Сервер запущен на порту ${port}`);
+server.listen(Number(port), "0.0.0.0", () => {
+    console.log(`[Server] Сервер запущен на порту ${port}`);
 });
