@@ -13,6 +13,12 @@ const ignoreOffer = new Map();
 // Мониторинг качества связи по getStats()
 const statsTimers = new Map();
 
+// Сторож установки соединения: peerId -> timeout. Если ICE не поднялся за
+// отведённое время — показываем причину (ICE может «залипнуть» в
+// checking/disconnected и никогда не дойти до 'failed' из-за restartIce).
+const iceWatchdogs = new Map();
+const ICE_WATCHDOG_MS = 12_000;
+
 // Текущее состояние медиа каждого пира: peerId -> { audio: bool, video: bool }
 const peerMediaState = new Map();
 
@@ -566,7 +572,8 @@ async function handleNewPeer(peerId, peerName, polite) {
             setTimeout(() => { if (pc.iceConnectionState === 'disconnected') { try { pc.restartIce(); } catch (e) {} } }, 6000);
         } else if (st === 'connected' || st === 'completed') {
             setQualityBadge(peerId, 'good', 'Соединение установлено');
-            // Соединение поднялось — снимаем предупреждение, если оно висело.
+            // Соединение поднялось — гасим сторож и снимаем предупреждение.
+            stopIceWatchdog(peerId);
             showIceWarningBanner(false);
         }
     };
@@ -586,6 +593,7 @@ async function handleNewPeer(peerId, peerName, polite) {
     };
 
     startStatsMonitor(peerId, pc);
+    startIceWatchdog(peerId, pc);
 
     // Сообщаем новому пиру своё состояние камеры/микрофона (для заглушки и кнопок).
     broadcastMyMediaState();
@@ -801,8 +809,25 @@ function stopStatsMonitor(peerId) {
     if (t) { clearInterval(t); statsTimers.delete(peerId); }
 }
 
+// Через ICE_WATCHDOG_MS проверяем: если соединение с пиром так и не поднялось —
+// объясняем пользователю причину. Ловит «залипание» в checking/disconnected,
+// когда состояние 'failed' не наступает.
+function startIceWatchdog(peerId, pc) {
+    stopIceWatchdog(peerId);
+    iceWatchdogs.set(peerId, setTimeout(() => {
+        const st = pc.iceConnectionState;
+        if (st !== 'connected' && st !== 'completed') showIceFailureWarning();
+    }, ICE_WATCHDOG_MS));
+}
+
+function stopIceWatchdog(peerId) {
+    const t = iceWatchdogs.get(peerId);
+    if (t) { clearTimeout(t); iceWatchdogs.delete(peerId); }
+}
+
 function removePeer(peerId) {
     stopStatsMonitor(peerId);
+    stopIceWatchdog(peerId);
     peerMediaState.delete(peerId);
     const pc = peerConnections.get(peerId);
     if (pc) { pc.close(); peerConnections.delete(peerId); makingOffer.delete(peerId); ignoreOffer.delete(peerId); }
