@@ -38,7 +38,30 @@ let currentRoomPasswordHash = '';
 
 // ICE-конфиг (STUN + TURN) запрашивается у сервера (TURN REST creds)
 let cachedRtcConfig = null;
-const FALLBACK_RTC = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+// Запасные STUN на случай, если запрос конфига к серверу не прошёл: несколько
+// независимых серверов повышают шанс собрать srflx-кандидат, если один недоступен.
+const FALLBACK_RTC = {
+    iceServers: [{
+        urls: [
+            'stun:stun.l.google.com:19302',
+            'stun:stun1.l.google.com:19302',
+            'stun:stun.cloudflare.com:3478'
+        ]
+    }]
+};
+
+// Хоть раз получили relay-кандидат от TURN — значит TURN реально доступен.
+// Нужно, чтобы отличить «TURN не настроен» от «TURN настроен, но недоступен».
+let sawRelayCandidate = false;
+
+// Есть ли в текущем ICE-конфиге хотя бы один TURN-сервер (turn:/turns:).
+function rtcConfigHasTurn(cfg) {
+    const servers = (cfg && cfg.iceServers) || [];
+    return servers.some(s => {
+        const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+        return urls.some(u => typeof u === 'string' && /^turns?:/i.test(u));
+    });
+}
 
 async function getRtcConfig() {
     if (cachedRtcConfig) return cachedRtcConfig;
@@ -521,16 +544,21 @@ async function handleNewPeer(peerId, peerName, polite) {
     };
 
     pc.onicecandidate = (event) => {
-        if (event.candidate) sendSignaling({ type: 'relay-ice', targetPeerId: peerId, candidate: event.candidate });
+        if (event.candidate) {
+            if (event.candidate.type === 'relay') sawRelayCandidate = true;
+            sendSignaling({ type: 'relay-ice', targetPeerId: peerId, candidate: event.candidate });
+        }
     };
 
     pc.oniceconnectionstatechange = () => {
         const st = pc.iceConnectionState;
         console.log(`[WebRTC] ICE ${peerName}: ${st}`);
         if (st === 'failed') {
-            // Реальный провал — перезапускаем ICE
+            // Реальный провал — перезапускаем ICE и предупреждаем пользователя:
+            // молчаливый провал ICE неотличим от «баг в приложении».
             try { pc.restartIce(); } catch (e) {}
             setQualityBadge(peerId, 'bad', 'Переподключение…');
+            showIceFailureWarning();
         } else if (st === 'disconnected') {
             // 'disconnected' часто кратковременный и восстанавливается сам —
             // не паникуем, ждём, и только если не вернулось за 6с, рестартим ICE.
@@ -538,6 +566,8 @@ async function handleNewPeer(peerId, peerName, polite) {
             setTimeout(() => { if (pc.iceConnectionState === 'disconnected') { try { pc.restartIce(); } catch (e) {} } }, 6000);
         } else if (st === 'connected' || st === 'completed') {
             setQualityBadge(peerId, 'good', 'Соединение установлено');
+            // Соединение поднялось — снимаем предупреждение, если оно висело.
+            showIceWarningBanner(false);
         }
     };
 
@@ -1068,6 +1098,54 @@ function showReconnectBanner(show, text) {
     if (banner) {
         if (show) { banner.textContent = text || 'Переподключение...'; banner.style.display = 'block'; }
         else banner.style.display = 'none';
+    }
+}
+
+// --- ПРЕДУПРЕЖДЕНИЕ О ПРОВАЛЕ ICE ---
+// Показываем понятную причину, когда медиасоединение с пиром не поднялось.
+// Диагностика по трём случаям: TURN не настроен / настроен, но недоступен /
+// прочая нестабильность сети.
+function showIceFailureWarning() {
+    const hasTurn = rtcConfigHasTurn(cachedRtcConfig);
+    let text;
+    if (!hasTurn) {
+        text = '⚠️ Не удаётся соединиться с собеседником. Вы, вероятно, в разных сетях за NAT/файрволом, а TURN-сервер не настроен — прямое P2P невозможно. Настройте TURN (см. DEPLOY.md).';
+    } else if (!sawRelayCandidate) {
+        text = '⚠️ Не удаётся соединиться. TURN указан в конфиге, но relay-кандидат не получен — TURN-сервер недоступен или настроен неверно (проверьте адрес, секрет и порты).';
+    } else {
+        text = '⚠️ Соединение с собеседником нестабильно, пытаемся переподключиться…';
+    }
+    showIceWarningBanner(true, text);
+}
+
+function showIceWarningBanner(show, text) {
+    let banner = document.getElementById('ice-warning-banner');
+    if (!banner && show) {
+        banner = document.createElement('div');
+        banner.id = 'ice-warning-banner';
+        banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#b8860b;color:#fff;text-align:center;padding:8px 40px;z-index:9998;font-size:13px;font-weight:bold;box-shadow:0 2px 6px rgba(0,0,0,0.35);';
+
+        const span = document.createElement('span');
+        span.id = 'ice-warning-text';
+        banner.appendChild(span);
+
+        const close = document.createElement('button');
+        close.textContent = '✕';
+        close.title = 'Скрыть';
+        close.style.cssText = 'position:absolute;top:50%;right:10px;transform:translateY(-50%);background:transparent;border:none;color:#fff;font-size:16px;line-height:1;cursor:pointer;';
+        close.addEventListener('click', () => { banner.style.display = 'none'; });
+        banner.appendChild(close);
+
+        document.body.appendChild(banner);
+    }
+    if (banner) {
+        if (show) {
+            const span = document.getElementById('ice-warning-text');
+            if (span) span.textContent = text || '';
+            banner.style.display = 'block';
+        } else {
+            banner.style.display = 'none';
+        }
     }
 }
 

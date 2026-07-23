@@ -32,7 +32,10 @@ const TURN_SECRET = process.env.TURN_SECRET || '';
 const TURN_URLS = (process.env.TURN_URLS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
 const TURN_TTL = Number(process.env.TURN_TTL || 3600); // сек, срок жизни TURN-креды
-const STUN_URLS = (process.env.STUN_URLS || 'stun:stun.l.google.com:19302')
+// Несколько независимых публичных STUN по умолчанию: если один недоступен или
+// режет запросы, srflx-кандидат всё равно соберётся с другого. STUN не заменяет
+// TURN (symmetric NAT/файрволы), но даёт запас надёжности для обычных NAT.
+const STUN_URLS = (process.env.STUN_URLS || 'stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302,stun:stun.cloudflare.com:3478')
   .split(',').map(s => s.trim()).filter(Boolean);
 
 // Тайминги устойчивости на слабом интернете

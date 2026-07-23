@@ -9,7 +9,10 @@
       "Read(//tmp/**)",
       "Bash(pkill -f \"dist/server.js\")",
       "Bash(PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 timeout 180 npm install --save-dev @playwright/test)",
-      "Bash(npm audit *)"
+      "Bash(npm audit *)",
+      "Bash(npm run *)",
+      "Bash(npx playwright *)",
+      "Read(//c/Users/Igor/AppData/Local/ms-playwright/**)"
     ]
   }
 }
