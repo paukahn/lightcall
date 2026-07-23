@@ -5,3 +5,6 @@ dist
 .env
 .idea
 .ds_store
+test-results
+playwright-report
+.cache

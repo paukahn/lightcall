@@ -5,3 +5,9 @@ dist
 .env
 .idea
 .ds_store
+tests
+playwright.config.ts
+playwright-report
+test-results
+.github
+*.md

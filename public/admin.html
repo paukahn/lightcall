@@ -2,74 +2,142 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LightCall — Панель Администратора</title>
     <style>
         body { font-family: sans-serif; background: #121212; color: #fff; padding: 20px; }
         .room-card { background: #1e1e1e; border: 1px solid #333; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-        .participant { display: flex; justify-content: space-between; align-items: center; padding: 8px; background: #2a2a2a; margin: 5px 0; border-radius: 4px; }
+        .participant { display: flex; justify-content: space-between; align-items: center; padding: 8px; background: #2a2a2a; margin: 5px 0; border-radius: 4px; gap: 8px; flex-wrap: wrap; }
         button { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
         .btn-kick { background: #dc3545; color: white; margin-left: 10px; }
         .btn-crown { background: #ffc107; color: black; }
+        .btn-mute { background: #2a2a2a; color: white; }
         h1 { border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        #login { max-width: 380px; margin: 60px auto; background: #1e1e1e; padding: 24px; border-radius: 8px; }
+        #login input { width: 100%; padding: 10px; margin: 10px 0; border-radius: 4px; border: 1px solid #333; background: #2a2a2a; color: #fff; box-sizing: border-box; }
+        #login button { width: 100%; background: #007bff; color: #fff; }
+        #metrics { background: #16233a; border: 1px solid #274; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; font-family: monospace; font-size: 13px; }
+        .offline { opacity: 0.5; }
+        .badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
+        .badge-on { background: #1e5631; }
+        .badge-off { background: #5c1e1e; }
     </style>
 </head>
 <body>
-    <h1>🛡️ Управление комнатами в RAM</h1>
-    <div id="rooms-container">Ожидание авторизации...</div>
+    <div id="login">
+        <h2>🛡️ Вход в админку</h2>
+        <input type="password" id="token-input" placeholder="Токен администратора" autocomplete="off">
+        <button id="btn-login">Подключиться</button>
+        <p id="login-error" style="color:#ff6b6b;font-size:13px;"></p>
+    </div>
+
+    <div id="dashboard" style="display:none;">
+        <h1>🛡️ Управление комнатами в RAM</h1>
+        <div id="metrics">Метрики загружаются...</div>
+        <div id="rooms-container">Ожидание данных...</div>
+    </div>
 
     <script>
-        const params = new URLSearchParams(window.location.search);
-        const token = params.get('token');
+        let ws = null;
+        let currentToken = null;
+        let reconnectTimer = null;
 
-        if (!token) {
-            document.body.innerHTML = '<h1>Ошибка доступа: Токен не указан (?token=...)</h1>';
-        } else {
+        // Токен НЕ передаётся в URL. Берём из поля ввода или из sessionStorage.
+        const saved = sessionStorage.getItem('lc_admin_token');
+        if (saved) document.getElementById('token-input').value = saved;
+
+        document.getElementById('btn-login').addEventListener('click', () => {
+            const token = document.getElementById('token-input').value.trim();
+            if (!token) { showError('Введите токен.'); return; }
+            currentToken = token;
+            sessionStorage.setItem('lc_admin_token', token);
+            connect();
+        });
+
+        function showError(msg) { document.getElementById('login-error').textContent = msg; }
+
+        function connect() {
             const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-            const ws = new WebSocket(wsProtocol + window.location.host);
-
-            ws.onopen = () => ws.send(JSON.stringify({ type: 'admin-auth', token }));
+            ws = new WebSocket(wsProtocol + window.location.host);
+            ws.onopen = () => ws.send(JSON.stringify({ type: 'admin-auth', token: currentToken }));
             ws.onmessage = (msg) => {
                 const data = JSON.parse(msg.data);
-                if (data.type === 'admin-state') renderRooms(data.rooms);
-                if (data.type === 'error') alert(data.message);
-            };
-
-            function renderRooms(rooms) {
-                const container = document.getElementById('rooms-container');
-                if (rooms.length === 0) {
-                    container.innerHTML = '<h3>Активных комнат нет. В памяти чисто.</h3>';
-                    return;
+                if (data.type === 'admin-state') {
+                    document.getElementById('login').style.display = 'none';
+                    document.getElementById('dashboard').style.display = 'block';
+                    renderMetrics(data.metrics);
+                    renderRooms(data.rooms);
                 }
-                container.innerHTML = '';
-                rooms.forEach(room => {
-                    const card = document.createElement('div');
-                    card.className = 'room-card';
-                    card.innerHTML = `<h3>Комната: ${room.name} (ID: ${room.id})</h3>`;
-
-                    room.participants.forEach(p => {
-                        const div = document.createElement('div');
-                        div.className = 'participant';
-                        div.innerHTML = `
-                            <span>${p.name} ${p.isCreator ? '👑' : ''} [ID: ${p.id}] [Approved: ${p.approved}]</span>
-                            <div>
-                                <button style="background: #2a2a2a; color: white;" onclick="adminMute('${room.id}', '${p.id}', 'audio')">🔇 Звук</button>
-                                <button style="background: #2a2a2a; color: white;" onclick="adminMute('${room.id}', '${p.id}', 'video')">📷 Видео</button>
-                                ${!p.isCreator ? `<button class="btn-crown" onclick="makeCreator('${room.id}', '${p.id}')">Дать права</button>` : ''}
-                                <button class="btn-kick" onclick="kick('${room.id}', '${p.id}')">Кикнуть</button>
-                            </div>
-                        `;
-                        card.appendChild(div);
-                    });
-                    container.appendChild(card);
-                });
-            }
-
-            window.kick = (roomId, userId) => ws.send(JSON.stringify({ type: 'admin-kick', roomId, userId }));
-            window.makeCreator = (roomId, userId) => ws.send(JSON.stringify({ type: 'admin-make-creator', roomId, userId }));
-            window.adminMute = (roomId, userId, mediaType) => {
-                ws.send(JSON.stringify({ type: 'admin-mute-peer', roomId, userId, mediaType }));
+                if (data.type === 'error') showError(data.message);
+            };
+            ws.onclose = () => {
+                // авто-переподключение админки, пока есть токен
+                if (currentToken && document.getElementById('dashboard').style.display === 'block') {
+                    clearTimeout(reconnectTimer);
+                    reconnectTimer = setTimeout(connect, 3000);
+                }
             };
         }
+
+        function renderMetrics(m) {
+            const box = document.getElementById('metrics');
+            if (!m) { box.textContent = ''; return; }
+            box.textContent = `📊 Комнат: ${m.rooms} | Соединений: ${m.connections} | RAM (RSS): ${m.rssMB} MB | Heap: ${m.heapMB} MB | Uptime: ${m.uptimeSec}s`;
+        }
+
+        function renderRooms(rooms) {
+            const container = document.getElementById('rooms-container');
+            container.textContent = '';
+            if (!rooms || rooms.length === 0) {
+                const h = document.createElement('h3');
+                h.textContent = 'Активных комнат нет. В памяти чисто.';
+                container.appendChild(h);
+                return;
+            }
+
+            rooms.forEach(room => {
+                const card = document.createElement('div');
+                card.className = 'room-card';
+                const title = document.createElement('h3');
+                title.textContent = `Комната: ${room.name} (ID: ${room.id})`;
+                card.appendChild(title);
+
+                room.participants.forEach(p => {
+                    const div = document.createElement('div');
+                    div.className = 'participant' + (p.connected ? '' : ' offline');
+
+                    const info = document.createElement('span');
+                    info.textContent = `${p.name} ${p.isCreator ? '👑' : ''} [ID: ${p.id}] [Approved: ${p.approved}]`;
+                    const conn = document.createElement('span');
+                    conn.className = 'badge ' + (p.connected ? 'badge-on' : 'badge-off');
+                    conn.textContent = p.connected ? 'online' : 'reconnecting';
+                    info.appendChild(conn);
+                    div.appendChild(info);
+
+                    const actions = document.createElement('div');
+                    actions.appendChild(mkBtn('🔇 Звук', 'btn-mute', () => adminMute(room.id, p.id, 'audio')));
+                    actions.appendChild(mkBtn('📷 Видео', 'btn-mute', () => adminMute(room.id, p.id, 'video')));
+                    if (!p.isCreator) actions.appendChild(mkBtn('Дать права', 'btn-crown', () => makeCreator(room.id, p.id)));
+                    actions.appendChild(mkBtn('Кикнуть', 'btn-kick', () => kick(room.id, p.id)));
+                    div.appendChild(actions);
+
+                    card.appendChild(div);
+                });
+                container.appendChild(card);
+            });
+        }
+
+        function mkBtn(label, cls, handler) {
+            const b = document.createElement('button');
+            b.className = cls;
+            b.textContent = label;
+            b.addEventListener('click', handler);
+            return b;
+        }
+
+        function kick(roomId, userId) { ws.send(JSON.stringify({ type: 'admin-kick', roomId, userId })); }
+        function makeCreator(roomId, userId) { ws.send(JSON.stringify({ type: 'admin-make-creator', roomId, userId })); }
+        function adminMute(roomId, userId, mediaType) { ws.send(JSON.stringify({ type: 'admin-mute-peer', roomId, userId, mediaType })); }
     </script>
 </body>
 </html>

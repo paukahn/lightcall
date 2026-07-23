@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts"
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -14,6 +15,7 @@
     "ws": "^8.17.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.9",
     "@types/ws": "^8.5.10",

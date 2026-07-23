@@ -6,20 +6,62 @@ services:
     env_file:
       - .env
     restart: always
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/ice-servers"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Ограничение ресурсов под целевой VPS 1 vCPU / 1GB (сигналинг легко влезает)
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 900M
 
   coturn:
     image: coturn/coturn:latest
-    ports:
-      - "3478:3478/udp"
-      - "3478:3478/tcp"
+    network_mode: host          # TURN relay требует прямого доступа к диапазону портов
     environment:
       - DETECT_EXTERNAL_IP=yes
     command:
       - -n
-      - --lt-cred-mech
+      - --use-auth-secret                          # TURN REST API вместо статических кредов
+      - --static-auth-secret=${TURN_SECRET}        # общий секрет с Node (из .env)
+      - --realm=${TURN_REALM:-lightcall.local}
       - --fingerprint
       - --no-multicast-peers
       - --no-loopback-peers
-      - --user=myuser:mypassword
-      - --realm=lightcall.local
+      - --no-cli
+      - --min-port=${TURN_MIN_PORT:-49160}         # узкий relay-диапазон под маленький VPS
+      - --max-port=${TURN_MAX_PORT:-49200}
+      # --- Защита от абуза relay (кража полосы на маленьком VPS) ---
+      - --total-quota=${TURN_TOTAL_QUOTA:-20}      # макс. одновременных allocation на сервере
+      - --max-bps=${TURN_MAX_BPS:-250000}          # потолок байт/с на одну сессию (~2 Мбит/с)
+      - --denied-peer-ip=10.0.0.0-10.255.255.255   # запрет relay во внутренние сети (анти-SSRF)
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      # --- TLS/443 fallback (раскомментировать при наличии сертификатов) ---
+      # Нужен для сетей, где режется весь UDP и всё кроме 443/tcp.
+      # - --tls-listening-port=5349
+      # - --cert=/etc/coturn/cert.pem
+      # - --pkey=/etc/coturn/key.pem
+    # volumes:
+    #   - ./certs:/etc/coturn:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: always
+
+# ПРИМЕЧАНИЕ ПО БЮДЖЕТУ (1 vCPU / 1GB):
+# TURN — это bandwidth cost, а не CPU. При нескольких одновременных relay-звонках
+# с видео канал маленького VPS насыщается быстро. Для продакшена рекомендуется
+# вынести coturn на ОТДЕЛЬНЫЙ сервер/канал и указать его адрес в TURN_URLS.
